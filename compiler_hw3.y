@@ -371,10 +371,32 @@ Add_op
 MulExpr
     : UnaryExpr
     | MulExpr Mul_op UnaryExpr {
-        if(strcmp($2, "REM")==0)
-            if(strcmp(get_exp_type($1), "float32")==0 || strcmp(get_exp_type($3), "float32")==0)
-                yyerror("invalid operation: (operator REM not defined on float32)"); 
-        printf("%s\n", $2); 
+        printf("%s\n", $2);
+        if(strcmp($2, "MUL")==0){
+            if(strcmp($1, "int32")==0){
+                fprintf(fout, "\timul\n");
+            }
+            else if(strcmp($1, "float32")==0){
+                fprintf(fout, "\tfmul\n");
+            }
+        }
+        else if(strcmp($2, "QUO")==0){
+            if(strcmp(types, "int32")==0){
+                fprintf(fout, "\tidiv\n");
+            }
+            else if(strcmp(types, "float32")==0){
+                fprintf(fout, "\tfdiv\n");
+            }
+        }
+        else if(strcmp($2, "REM")==0){
+            if(strcmp(get_exp_type($1), "float32")==0 || strcmp(get_exp_type($3), "float32")==0){
+                yyerror("invalid operation: (operator REM not defined on float32)");
+                g_has_error = true;
+            }
+           else{
+               fprintf(fout, "\tirem\n");
+           }
+        }
     }
 ;      
 
@@ -386,12 +408,34 @@ Mul_op
 
 UnaryExpr
     : PrimaryExpr
-    | Unary_op UnaryExpr { printf("%s\n", $1); }
+    | Unary_op UnaryExpr 
+    { 
+        printf("%s\n", $1);
+        if(check_type($2)!=0){
+            if(strcmp($1, "NEG")==0){
+                if(strcmp($2, "int32")==0){
+                    fprintf(fout, "\tineg\n");
+                    $$ = "int32";
+                }
+                else if(strcmp($2, "float32")==0){
+                    fprintf(fout, "\tfneg\n");
+                    $$ = "float32";
+                }
+            }
+            else if(strcmp($1, "NOT")==0){ //!
+                fprintf(fout, "\ticonst_1\n"); //load true for "not" operator
+                fprintf(fout, "\tixor\n");
+                $$ = "bool";
+            }
+        }
+    }
 ;    
 
 Unary_op
     : '+' { $$ = "POS"; }
-    | '-' { $$ = "NEG"; }
+    | '-' { $$ = "NEG";
+            // strcpy(operation, "NEG");
+          }
     | '!' { $$ = "NOT"; }
 ;    
 
