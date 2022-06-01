@@ -35,7 +35,7 @@
     static void dump_symbol(int level);
 
     static char* get_exp_type(char* name);
-    static int check_type(char* name);
+    static char* check_type(char* name);
 
     /* Global variables */
     bool g_has_error = false;
@@ -50,6 +50,7 @@
     Symbol symbol_table[30][40];
     int table_size[30];
     Symbol *current; //current read in token
+    char printType[10];
 
     //record function information
     char func_name[15];
@@ -134,8 +135,28 @@ FunctionDeclStmt
         strcat(func_signature, return_type);
     	printf ("func_signature: %s\n", func_signature);
     	insert_symbol(func_name, "func", func_signature, 0);
-    }
+        if(strcmp(func_name, "main")==0){
+            fprintf(fout, ".method public static main([Ljava/lang/String;)V\n");
+        }
+        else{
+            fprintf(fout, ".method public static %s%s\n", func_name, func_signature);
+        }
+        fprintf(fout, ".limit stack 50\n");
+        fprintf(fout, ".limit locals 50\n");
+    }  
     FuncBlock
+    {
+        if(strcmp(return_type, "I")==0){
+            fprintf(fout, "\tireturn\n");
+        }
+        else if(strcmp(return_type, "F")==0){
+            fprintf(fout, "\tfreturn\n");
+        }
+        else if(strcmp(return_type, "V")==0){
+            fprintf(fout, "\treturn\n");
+        }
+        fprintf(fout, ".end method\n\n");
+    }
 ;
 
 ParameterList
@@ -217,17 +238,26 @@ Literal
     : INT_LIT {
         $$ = "int32"; printf("INT_LIT %s\n", $1); 
     	strcpy(types, "int32");
+        fprintf(fout, "\tldc %s\n", $1);
     }
     | FLOAT_LIT { 
     	$$ = "float32"; 
         printf("FLOAT_LIT %f\n", atof($1));
         strcpy(types, "float32");
+        fprintf(fout, "\tldc %s\n", $1);
     }
     | BOOL_LIT {
         $$ = "bool"; printf("%s\n", $1); strcpy(types, "bool"); 
+        if(strcmp(yylval.s_val,"TRUE 1")==0){
+            fprintf(fout,"\ticonst_1\n");
+        }
+        else{
+            fprintf(fout, "\ticonst_0\n");
+        }
     }
     | '"' STRING_LIT '"' { 
     	$$ = "string"; printf("STRING_LIT %s\n", $2); strcpy(types, "string"); 
+        fprintf(fout, "\tldc \"%s\"\n", $2);
     }
 ; 
 
@@ -382,7 +412,7 @@ IndexExpr
 
 ConversionExpr
     : Type '(' Expression ')' {
-        if(check_type($3)){
+        if(strcmp(check_type($3), "null")!=0){
             printf("%c2%c\n", $3[0], $1[0]);
     	}
         else{
@@ -470,8 +500,35 @@ Type
 
 PrintStmt
     : PRINT '(' Expression ')'{
-    	if(check_type($3)){
+        strcpy(printType, check_type($3));
+    	if(strcmp(printType, "null")!=0){
     		printf("PRINT %s\n", $3);
+            if(strcmp(printType, "int32")==0){
+                fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(fout, "\tswap\n");
+                fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(I)V\n");
+            }
+            else if(strcmp(printType, "float32")==0){
+                fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(fout, "\tswap\n");
+                fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(F)V\n");
+            }
+            else if(strcmp(printType, "bool")==0){
+                fprintf(fout, "\tifne L_cmp_0\n");
+                fprintf(fout, "\tldc \"false\"\n");
+                fprintf(fout, "\tgoto L_cmp_1\n");
+                fprintf(fout, "L_cmp_0:\n");
+                fprintf(fout, "\tldc \"true\"\n");
+                fprintf(fout, "L_cmp_1:\n");
+                fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(fout, "\tswap\n");
+                fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(Ljava/lang/String;)V\n");
+            }
+            else if(strcmp(printType, "string")==0){
+                fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(fout, "\tswap\n");
+                fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(Ljava/lang/String;)V\n");
+            }
     	}
     	else{
     		Symbol t = lookup_symbol($3, 1);
@@ -485,8 +542,35 @@ PrintStmt
     	strcpy(types, "null");
     }
     | PRINTLN '(' Expression ')' {
-    	if(check_type($3)){
+        strcpy(printType, check_type($3));
+    	if(strcmp(printType, "null")!=0){
     		printf("PRINTLN %s\n", $3);
+            if(strcmp(printType, "int32")==0){
+                fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(fout, "\tswap\n");
+                fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(I)V\n");
+            }
+            else if(strcmp(printType, "float32")==0){
+                fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(fout, "\tswap\n");
+                fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(F)V\n");
+            }
+            else if(strcmp(printType, "bool")==0){
+                fprintf(fout, "\tifne L_cmp_0\n");
+                fprintf(fout, "\tldc \"false\"\n");
+                fprintf(fout, "\tgoto L_cmp_1\n");
+                fprintf(fout, "L_cmp_0:\n");
+                fprintf(fout, "\tldc \"true\"\n");
+                fprintf(fout, "L_cmp_1:\n");
+                fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(fout, "\tswap\n");
+                fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
+            }
+            else if(strcmp(printType, "string")==0){
+                fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(fout, "\tswap\n");
+                fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
+            }
     	}
     	else{
     		Symbol t = lookup_symbol($3, 1);
@@ -524,7 +608,7 @@ int main(int argc, char *argv[])
     CODEGEN(".super java/lang/Object\n"); */
     fprintf(fout, ".source hw3.j\n");
     fprintf(fout, ".class public Main\n");
-    fprintf(fout, ".super java/lang/Object\n");
+    fprintf(fout, ".super java/lang/Object\n\n");
 
     /* Symbol table init */
     // Add your code
@@ -538,6 +622,7 @@ int main(int argc, char *argv[])
     dump_symbol(level);
 
 	printf("Total lines: %d\n", yylineno);
+
     fclose(fout);
     fclose(yyin);
 
@@ -659,15 +744,15 @@ static char* get_exp_type(char* name){
     return name;
 }
 
-static int check_type(char* name){
+static char* check_type(char* name){
         char* type[4] = {"int32",
                      "float32",
                      "bool",
                      "string"};
     for(int i = 0; i < 4; i++){
         if(strcmp(name, type[i])==0){
-            return 1;
+            return type[i];
         } 
     }
-    return 0;
+    return "null";
 }
