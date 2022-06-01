@@ -1,5 +1,3 @@
-
-
 /* Definition section */
 %{
     #include "compiler_hw_common.h"
@@ -39,6 +37,7 @@ fnumber ({digit}*\.{digit}+)
 <STR>[^\"]* { yylval.s_val = strdup(yytext);
                 return STRING_LIT;
             }
+ /* Arithmetic */            
 "+"         { return '+'; }
 "-"         { return '-'; }
 "*"         { return '*'; }
@@ -46,47 +45,73 @@ fnumber ({digit}*\.{digit}+)
 "%"         { return '%'; }
 "++"        { return INC; }
 "--"        { return DEC; }
+
+ /* Relational */
 ">"         { return '>'; }
 "<"         { return '<'; }
 ">="        { return GEQ; }
-"<="        { return XXX; }
-"=="        { return XXX; }
-"!="        { return XXX; }
+"<="        { return LEQ ; }
+"=="        { return EQL; }
+"!="        { return NEQ ; }
+
+ /* Assignment */
 "="         { return '='; }
 "+="        { return ADD_ASSIGN; }
 "-="        { return SUB_ASSIGN; }
-"*="        { return XXX; }
-"/="        { return XXX; }
-"%="        { return XXX; }
+"*="        { return MUL_ASSIGN; }
+"/="        { return QUO_ASSIGN; }
+"%="        { return REM_ASSIGN; }
+
+ /* Logical */
 "&&"        { return LAND; }
 "||"        { return LOR; }
 "!"         { return '!'; }
+
+ /* Delimiters */
 "("         { return '('; }
 ")"         { return ')'; }
 "["         { return '['; }
 "]"         { return ']'; }
 "{"         { return '{'; }
 "}"         { return '}'; }
+
 ";"         { return ';'; }
+":"         { return ':'; }
 ","         { return ','; }
 "\n"        { return NEWLINE; }
+ /* Print */
 "print"     { return PRINT; }
-"println"   { return XXX; }
+"println"   { return PRINTLN; }
+
+ /* Condition Loop */
 "if"        { return IF; }
 "else"      { return ELSE; }
 "for"       { return FOR; }
+"switch"    { return SWITCH; }
+"case"      { return CASE; }
+
+"var"       { return VAR; }
+"package"   { return PACKAGE; }
+"default"   { return DEFAULT; }
+"func"      { return FUNC; }
+"return"    { return RETURN; }
+
+ /* type */
 "int32"     { return INT; }
 "float32"   { return FLOAT;}
 "string"    { return STRING; }
 "bool"      { return BOOL; }
-"true"      { XXX; }
-"false"     { XXX; }
-"var"       { return VAR; }
-{inumber}   { yylval.i_val = atoi(yytext);
+"true"      { yylval.s_val = "TRUE 1"; return BOOL_LIT; }
+"false"     { yylval.s_val = "FALSE 0"; return BOOL_LIT; }
+
+{inumber}   { yylval.s_val = strdup(yytext);
                 return INT_LIT;
             }
-{fnumber}   { XXX; }
-{id}        { XXX; }
+{fnumber}   { yylval.s_val = strdup(yytext);
+                return FLOAT_LIT; }
+{id}        { yylval.s_val = strdup(yytext);
+                return IDENT; }
+
 <<EOF>>     { static int once = 0;
                 if (once++) {
                     yyterminate();

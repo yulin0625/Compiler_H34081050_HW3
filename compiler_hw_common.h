@@ -6,6 +6,14 @@
 #include <string.h>
 #include <stdbool.h>
 
-/* Add what you need */
+/*Symbol table*/
+typedef struct Symbol {
+    int index;
+    char name[15];
+    char type[10];
+    int addr;
+    int lineno;
+    char func_sig[10];
+} Symbol;
 
 #endif /* COMPILER_HW_COMMON_H */
