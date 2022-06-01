@@ -414,11 +414,23 @@ ConversionExpr
     : Type '(' Expression ')' {
         if(strcmp(check_type($3), "null")!=0){
             printf("%c2%c\n", $3[0], $1[0]);
+            if(strcmp($3, "int32")==0 && strcmp($1, "float32")==0){
+                fprintf(fout, "\ti2f\n");
+            }
+            else if(strcmp($3, "float32")==0 && strcmp($1, "int32")==0){
+                fprintf(fout, "\tf2i\n");
+            }
     	}
         else{
             Symbol t = lookup_symbol($3, 1);
             if(strcmp(t.name, "NotDefineYet")!=0){
                 printf("%c2%c\n", t.type[0], $1[0]);
+                if(strcmp($3, "int32")==0 && strcmp($1, "float32")==0){
+                    fprintf(fout, "\ti2f\n");
+                }   
+                else if(strcmp($3, "float32")==0 && strcmp($1, "int32")==0){
+                    fprintf(fout, "\tf2i\n");
+                }
             }
     	}
     	strcpy(types, $1); 
