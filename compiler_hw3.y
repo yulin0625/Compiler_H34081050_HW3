@@ -41,6 +41,7 @@
     bool g_has_error = false;
     FILE *fout = NULL;
     int g_indent_cnt = 0;
+    int cmp_count = -1;
     //my variable
     int address = 0;
     int level = -1;
@@ -227,6 +228,7 @@ Lvalue
         if(strcmp(t.name, "NotDefineYet")!=0){ 
             printf("IDENT (name=%s, address=%d)\n", $1, t.addr);            
             strcpy(types, t.type);
+            $$ = t.type;
         }
         else{
             printf("error:%d: undefined: %s\n", yylineno+1, $1);
@@ -236,7 +238,8 @@ Lvalue
 
 Literal
     : INT_LIT {
-        $$ = "int32"; printf("INT_LIT %s\n", $1); 
+        $$ = "int32"; 
+        printf("INT_LIT %s\n", $1); 
     	strcpy(types, "int32");
         fprintf(fout, "\tldc %s\n", $1);
     }
@@ -247,7 +250,9 @@ Literal
         fprintf(fout, "\tldc %s\n", $1);
     }
     | BOOL_LIT {
-        $$ = "bool"; printf("%s\n", $1); strcpy(types, "bool"); 
+        $$ = "bool"; 
+        printf("%s\n", $1); 
+        strcpy(types, "bool"); 
         if(strcmp(yylval.s_val,"TRUE 1")==0){
             fprintf(fout,"\ticonst_1\n");
         }
@@ -256,7 +261,9 @@ Literal
         }
     }
     | '"' STRING_LIT '"' { 
-    	$$ = "string"; printf("STRING_LIT %s\n", $2); strcpy(types, "string"); 
+    	$$ = "string"; 
+        printf("STRING_LIT %s\n", $2); 
+        strcpy(types, "string"); 
         fprintf(fout, "\tldc \"%s\"\n", $2);
     }
 ; 
@@ -310,28 +317,36 @@ ExpressionStmt
 Expression
     : LandExpr
     | Expression LOR LandExpr {
-        $$ = "bool"; strcpy(types, "bool");
+        $$ = "bool"; 
+        strcpy(types, "bool");
 	    if(strcmp($1, "int32")== 0 || strcmp($3, "int32")==0){
 		    yyerror("invalid operation: (operator LOR not defined on int32)");
+            g_has_error = true;
 	    }
 	    if(strcmp($1, "float32")==0 || strcmp($3, "float32")==0 ){
 		    yyerror("invalid operation: (operator LOR not defined on float32)");
-	    }
+            g_has_error = true;
+        }
 	    printf("LOR\n"); 
+        fprintf(fout, "\tior\n");
     }
 ;    
 
 LandExpr
     : CmpExpr //ex: x>1
     | LandExpr LAND CmpExpr { //ex: x>1 && y>2 && z>3 
-        $$ = "bool"; strcpy(types, "bool");
+        $$ = "bool"; 
+        strcpy(types, "bool");
 	    if(strcmp($1, "int32")==0 || strcmp($3, "int32")==0){
 		    yyerror("invalid operation: (operator LAND not defined on int32)");
-	    }
+            g_has_error = true;
+        }
 	    if(strcmp($1, "float32")==0 || strcmp($3, "float32")==0){
 		    yyerror("invalid operation: (operator LAND not defined on float32)");
-	    }
+            g_has_error = true;
+        }
 	    printf("LAND\n"); 
+        fprintf(fout, "\tiand\n");
     }
 ;    
 
@@ -340,8 +355,48 @@ CmpExpr
     | CmpExpr Cmp_op AddExpr {
         if(strcmp(get_exp_type($1), "null")==0)
             printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno+1, $2, "ERROR", types); //倒數第二個 "ERROR" ??
-        $$ = $2;
-        printf("%s\n", $2); strcpy(types, "bool");
+        $$ = "bool";
+        printf("%s\n", $2); 
+        strcpy(types, "bool");
+        if(strcmp($1, "int32")==0){
+            fprintf(fout, "\tisub\n");
+        }
+        else if(strcmp($1, "float32")==0){
+            fprintf(fout, "\tfcmpl\n");
+        }
+            
+        if(strcmp($2, "EQL")==0){
+            cmp_count++;
+            fprintf(fout, "\tifeq L_cmp_%d\n", cmp_count);
+        }
+        else if(strcmp($2, "NEQ")==0){
+            cmp_count++;
+            fprintf(fout, "\tifne L_cmp_%d\n", cmp_count);                
+        }
+        else if(strcmp($2, "LSS")==0){
+            cmp_count++;
+            fprintf(fout, "\tiflt L_cmp_%d\n", cmp_count);                
+        }
+        else if(strcmp($2, "LEQ")==0){
+            cmp_count++;
+            fprintf(fout, "\tifle L_cmp_%d\n", cmp_count);                
+        }
+        else if(strcmp($2, "GTR")==0){
+            cmp_count++;
+            fprintf(fout, "\tifgt L_cmp_%d\n", cmp_count);
+        }
+        else if(strcmp($2, "GEQ")==0){
+            cmp_count++;
+            fprintf(fout, "\tifge L_cmp_%d\n", cmp_count);
+        }
+
+        fprintf(fout, "\ticonst_0\n");
+        cmp_count++;
+        fprintf(fout, "\tgoto L_cmp_%d\n", cmp_count);
+
+        fprintf(fout, "L_cmp_%d:\n", cmp_count-1);
+        fprintf(fout, "\ticonst_1\n");
+        fprintf(fout, "L_cmp_%d:\n", cmp_count);
     }
 ;    
 
@@ -357,9 +412,31 @@ Cmp_op
 AddExpr
     : MulExpr
     | AddExpr Add_op MulExpr{
-        if(strcmp(get_exp_type($1), "POS")!=0 &&  strcmp(get_exp_type($1), "NEG")!=0 && strcmp(get_exp_type($1), "bool")!=0 && strcmp(get_exp_type($1), types)!=0)
-    	printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operation, get_exp_type($1), types);
+        if(strcmp($1, "bool")!=0 && strcmp($1, $3)!=0){
+    	    printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operation, $1, $3);
+            g_has_error = true;
+        }
         printf("%s\n", $2); 
+        if(strcmp($2, "ADD")==0){
+            if(strcmp(types, "int32")==0){
+                fprintf(fout, "\tiadd\n");
+                $$ = "int32";
+            }
+            else if(strcmp(types, "float32")==0){
+                fprintf(fout, "\tfadd\n");
+                $$ = "float32";
+            }
+        }
+        else{
+            if(strcmp(types, "int32")==0){
+                fprintf(fout, "\tisub\n");
+                $$ = "int32";
+            }
+            else if(strcmp(types, "float32")==0){
+                fprintf(fout, "\tfsub\n");
+                $$ = "float32";
+            }  
+        }
     }
 ;    
 
@@ -375,17 +452,21 @@ MulExpr
         if(strcmp($2, "MUL")==0){
             if(strcmp($1, "int32")==0){
                 fprintf(fout, "\timul\n");
+                $$ = "int32";
             }
             else if(strcmp($1, "float32")==0){
                 fprintf(fout, "\tfmul\n");
+                $$ = "float32";
             }
         }
         else if(strcmp($2, "QUO")==0){
             if(strcmp(types, "int32")==0){
                 fprintf(fout, "\tidiv\n");
+                $$ = "int32";
             }
             else if(strcmp(types, "float32")==0){
                 fprintf(fout, "\tfdiv\n");
+                $$ = "float32";
             }
         }
         else if(strcmp($2, "REM")==0){
@@ -395,6 +476,7 @@ MulExpr
             }
            else{
                fprintf(fout, "\tirem\n");
+               $$ = "int32";
            }
         }
     }
@@ -412,6 +494,14 @@ UnaryExpr
     { 
         printf("%s\n", $1);
         if(check_type($2)!=0){
+            if(strcmp($1, "POS")==0){
+                if(strcmp($2, "int32")==0){
+                    $$ = "int32";
+                }
+                else if(strcmp($2, "float32")==0){
+                    $$ = "float32";
+                }
+            }
             if(strcmp($1, "NEG")==0){
                 if(strcmp($2, "int32")==0){
                     fprintf(fout, "\tineg\n");
@@ -433,9 +523,7 @@ UnaryExpr
 
 Unary_op
     : '+' { $$ = "POS"; }
-    | '-' { $$ = "NEG";
-            // strcpy(operation, "NEG");
-          }
+    | '-' { $$ = "NEG"; }
     | '!' { $$ = "NOT"; }
 ;    
 
@@ -460,9 +548,11 @@ ConversionExpr
             printf("%c2%c\n", $3[0], $1[0]);
             if(strcmp($3, "int32")==0 && strcmp($1, "float32")==0){
                 fprintf(fout, "\ti2f\n");
+                $$ = "float32";
             }
             else if(strcmp($3, "float32")==0 && strcmp($1, "int32")==0){
                 fprintf(fout, "\tf2i\n");
+                $$ = "int32";
             }
     	}
         else{
@@ -471,9 +561,11 @@ ConversionExpr
                 printf("%c2%c\n", t.type[0], $1[0]);
                 if(strcmp($3, "int32")==0 && strcmp($1, "float32")==0){
                     fprintf(fout, "\ti2f\n");
+                    $$ = "float32";
                 }   
                 else if(strcmp($3, "float32")==0 && strcmp($1, "int32")==0){
                     fprintf(fout, "\tf2i\n");
+                    $$ = "int32";
                 }
             }
     	}
@@ -570,12 +662,14 @@ PrintStmt
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(F)V\n");
             }
             else if(strcmp(printType, "bool")==0){
-                fprintf(fout, "\tifne L_cmp_0\n");
+                cmp_count++;
+                fprintf(fout, "\tifne L_cmp_%d\n", cmp_count);
                 fprintf(fout, "\tldc \"false\"\n");
-                fprintf(fout, "\tgoto L_cmp_1\n");
-                fprintf(fout, "L_cmp_0:\n");
+                cmp_count++;
+                fprintf(fout, "\tgoto L_cmp_%d\n", cmp_count);
+                fprintf(fout, "L_cmp_%d:\n", cmp_count-1);
                 fprintf(fout, "\tldc \"true\"\n");
-                fprintf(fout, "L_cmp_1:\n");
+                fprintf(fout, "L_cmp_%d:\n", cmp_count);
                 fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(Ljava/lang/String;)V\n");
@@ -612,12 +706,14 @@ PrintStmt
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(F)V\n");
             }
             else if(strcmp(printType, "bool")==0){
-                fprintf(fout, "\tifne L_cmp_0\n");
+                cmp_count++;
+                fprintf(fout, "\tifne L_cmp_%d\n", cmp_count);
                 fprintf(fout, "\tldc \"false\"\n");
-                fprintf(fout, "\tgoto L_cmp_1\n");
-                fprintf(fout, "L_cmp_0:\n");
+                cmp_count++;
+                fprintf(fout, "\tgoto L_cmp_%d\n", cmp_count);
+                fprintf(fout, "L_cmp_%d:\n", cmp_count-1);
                 fprintf(fout, "\tldc \"true\"\n");
-                fprintf(fout, "L_cmp_1:\n");
+                fprintf(fout, "L_cmp_%d:\n", cmp_count);
                 fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
