@@ -34,25 +34,33 @@
     static Symbol lookup_symbol(char* name, int tables);
     static void dump_symbol(int level);
 
-    static char* get_exp_type(char* name);
+    // static char* get_exp_type(char* name);
     static char* check_type(char* name);
 
     /* Global variables */
     bool g_has_error = false;
     FILE *fout = NULL;
     int g_indent_cnt = 0;
+    //label count
     int cmp_count = -1;
+    int if_count = -1;
+    int for_count = -1;
     //my variable
-    int address = 0;
-    int level = -1;
-    int is_func = 0;
-    char types[10];
-    char operation[10];
     Symbol symbol_table[30][40];
     int table_size[30];
     Symbol *current; //current read in token
-    char printType[10];
-
+    int address = 0; // symbol table variable address(unique)
+    int level = -1; // symbol table scope level
+    int is_func = 0;
+    char types[10]; // 檢查expr type(debug用)
+    char operation[10]; //紀錄目前的operation
+    int is_left = 1; //紀錄var 是否在=左邊，在左的話紀錄Lvar_addr
+    int Lvar_addr = -1; //紀錄=左邊的var addr
+    char Lvar_name[10]; //紀錄=左邊的var name(debug用)
+    char Lvar_type[10]; //紀錄=左邊的var type(debug用)
+    int Rvar_addr = -1; //紀錄=右邊的var addr(debug用)
+    char Rvar_name[10]; //紀錄=右邊的var name(debug用)
+    int is_var = 0; //紀錄要print的expression是否為var型態，目前無使用
     //record function information
     char func_name[15];
     int paraList_not_null;
@@ -208,6 +216,7 @@ CallFunc
            printf("call: %s%s\n",$1,t.func_sig);
            is_func = 0;
         }
+        fprintf(fout, "\tinvokestatic Main/%s%s\n", $1, t.func_sig); //invoke `fun` method in `Main` class
     }
 ;    
 
@@ -222,35 +231,67 @@ CallFuncParam
 ;    
 //不確定意義，原本為left
 Lvalue
-    : Literal { $$ = $1; }
+    : Literal { $$ = $1; is_var = 0;}
     | IDENT { 
-    	Symbol t = lookup_symbol($1, 1); 
+    	Symbol t = lookup_symbol($1, 1);
         if(strcmp(t.name, "NotDefineYet")!=0){ 
-            printf("IDENT (name=%s, address=%d)\n", $1, t.addr);            
+            printf("IDENT (name=%s, address=%d, type:%s)\n", $1, t.addr, t.type);
+                        
+            printf("is_left: %d\n", is_left);
+            if(1){ //is_left==0, println會出錯,先全部都load
+                if(strcmp(t.type, "int32")==0){
+                    fprintf(fout, "\tiload %d\n", t.addr);
+                }
+                else if(strcmp(t.type, "float32")==0){
+                    fprintf(fout, "\tfload %d\n", t.addr);
+                }
+                else if(strcmp(t.type, "string")==0){
+                    fprintf(fout, "\taload %d\n", t.addr);
+                }
+                else if(strcmp(t.type, "bool")==0){
+                    fprintf(fout, "\tiload %d\n", t.addr);
+                }
+            }
             strcpy(types, t.type);
+            
+            printf("var %s type: %s\n", t.name, t.type);
+            if(is_left==1){
+                Lvar_addr = t.addr;
+                strcpy(Lvar_name, t.name);
+                strcpy(Lvar_type, t.type);
+                printf("IDENT type: %s\n", t.type);
+            }
+            else{
+                Rvar_addr = t.addr;
+                strcpy(Rvar_name, t.name);
+                printf("IDENT type: %s, Rvar: %s, Rvar_addr: %d\n", t.type, Rvar_name, Rvar_addr);
+            }
             $$ = t.type;
         }
         else{
             printf("error:%d: undefined: %s\n", yylineno+1, $1);
+            Lvar_addr = -1;
+            g_has_error = true;
+            $$ = "null";
         }
+        is_var = 1;
     }
 ;
 
 Literal
     : INT_LIT {
-        $$ = "int32"; 
         printf("INT_LIT %s\n", $1); 
     	strcpy(types, "int32");
         fprintf(fout, "\tldc %s\n", $1);
+        $$ = "int32"; 
     }
     | FLOAT_LIT { 
-    	$$ = "float32"; 
         printf("FLOAT_LIT %f\n", atof($1));
         strcpy(types, "float32");
         fprintf(fout, "\tldc %s\n", $1);
+    	$$ = "float32"; 
     }
     | BOOL_LIT {
-        $$ = "bool"; 
         printf("%s\n", $1); 
         strcpy(types, "bool"); 
         if(strcmp(yylval.s_val,"TRUE 1")==0){
@@ -259,12 +300,13 @@ Literal
         else{
             fprintf(fout, "\ticonst_0\n");
         }
+        $$ = "bool"; 
     }
     | '"' STRING_LIT '"' { 
-    	$$ = "string"; 
         printf("STRING_LIT %s\n", $2); 
         strcpy(types, "string"); 
         fprintf(fout, "\tldc \"%s\"\n", $2);
+    	$$ = "string"; 
     }
 ; 
 
@@ -315,11 +357,13 @@ ExpressionStmt
 ;
 
 Expression
-    : LandExpr
+    : LandExpr 
+    { 
+        // printf("Expression type: %s\n", $ 1); //debug
+    }
     | Expression LOR LandExpr {
-        $$ = "bool"; 
         strcpy(types, "bool");
-	    if(strcmp($1, "int32")== 0 || strcmp($3, "int32")==0){
+	    if(strcmp($1, "int32")==0 || strcmp($3, "int32")==0){
 		    yyerror("invalid operation: (operator LOR not defined on int32)");
             g_has_error = true;
 	    }
@@ -329,13 +373,16 @@ Expression
         }
 	    printf("LOR\n"); 
         fprintf(fout, "\tior\n");
+        $$ = "bool"; 
     }
 ;    
 
-LandExpr
-    : CmpExpr //ex: x>1
+LandExpr 
+    : CmpExpr 
+    { 
+        // printf("CmpExpr type: %s\n", $ 1); //debug
+    }//ex: x>1
     | LandExpr LAND CmpExpr { //ex: x>1 && y>2 && z>3 
-        $$ = "bool"; 
         strcpy(types, "bool");
 	    if(strcmp($1, "int32")==0 || strcmp($3, "int32")==0){
 		    yyerror("invalid operation: (operator LAND not defined on int32)");
@@ -347,14 +394,21 @@ LandExpr
         }
 	    printf("LAND\n"); 
         fprintf(fout, "\tiand\n");
+        is_var = 0; 
+        $$ = "bool"; 
     }
 ;    
 
 CmpExpr
-    : AddExpr
+    : AddExpr 
+    { 
+        // printf("CmpExpr type: %s\n", $ 1); //debug
+    }
     | CmpExpr Cmp_op AddExpr {
-        if(strcmp(get_exp_type($1), "null")==0)
-            printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno+1, $2, "ERROR", types); //倒數第二個 "ERROR" ??
+        if(strcmp(check_type($1), "null")==0){
+            printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno+1, $2, "ERROR", types);
+            g_has_error = true;
+        }
         $$ = "bool";
         printf("%s\n", $2); 
         strcpy(types, "bool");
@@ -397,6 +451,7 @@ CmpExpr
         fprintf(fout, "L_cmp_%d:\n", cmp_count-1);
         fprintf(fout, "\ticonst_1\n");
         fprintf(fout, "L_cmp_%d:\n", cmp_count);
+        is_var = 0; 
     }
 ;    
 
@@ -410,33 +465,38 @@ Cmp_op
 ;    
 
 AddExpr
-    : MulExpr
+    : MulExpr 
+    {
+        printf("AddExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $1, Lvar_name, Lvar_addr); //debug
+    }
     | AddExpr Add_op MulExpr{
-        if(strcmp($1, "bool")!=0 && strcmp($1, $3)!=0){
+        printf("1: %s  3: %s\n", $1, $3); //debug
+        if(strcmp($1, $3)!=0){
     	    printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operation, $1, $3);
             g_has_error = true;
         }
-        printf("%s\n", $2); 
+        printf("%s\n", $2);
         if(strcmp($2, "ADD")==0){
-            if(strcmp(types, "int32")==0){
+            if(strcmp($1, "int32")==0){
                 fprintf(fout, "\tiadd\n");
                 $$ = "int32";
             }
-            else if(strcmp(types, "float32")==0){
+            else if(strcmp($1, "float32")==0){
                 fprintf(fout, "\tfadd\n");
                 $$ = "float32";
             }
         }
-        else{
-            if(strcmp(types, "int32")==0){
+        else{ //SUB
+            if(strcmp($1, "int32")==0){
                 fprintf(fout, "\tisub\n");
                 $$ = "int32";
             }
-            else if(strcmp(types, "float32")==0){
+            else if(strcmp($1, "float32")==0){
                 fprintf(fout, "\tfsub\n");
                 $$ = "float32";
             }  
         }
+        is_var = 0; 
     }
 ;    
 
@@ -446,9 +506,13 @@ Add_op
 ;    
 
 MulExpr
-    : UnaryExpr
+    : UnaryExpr 
+    { 
+        printf("MulExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $1, Lvar_name, Lvar_addr); //debug
+    }
     | MulExpr Mul_op UnaryExpr {
         printf("%s\n", $2);
+        printf("1: %s  3: %s\n", $1, $3); //debug
         if(strcmp($2, "MUL")==0){
             if(strcmp($1, "int32")==0){
                 fprintf(fout, "\timul\n");
@@ -460,17 +524,17 @@ MulExpr
             }
         }
         else if(strcmp($2, "QUO")==0){
-            if(strcmp(types, "int32")==0){
+            if(strcmp($1, "int32")==0){
                 fprintf(fout, "\tidiv\n");
                 $$ = "int32";
             }
-            else if(strcmp(types, "float32")==0){
+            else if(strcmp($1, "float32")==0){
                 fprintf(fout, "\tfdiv\n");
                 $$ = "float32";
             }
         }
         else if(strcmp($2, "REM")==0){
-            if(strcmp(get_exp_type($1), "float32")==0 || strcmp(get_exp_type($3), "float32")==0){
+            if(strcmp($1, "float32")==0 || strcmp($3, "float32")==0){
                 yyerror("invalid operation: (operator REM not defined on float32)");
                 g_has_error = true;
             }
@@ -479,6 +543,7 @@ MulExpr
                $$ = "int32";
            }
         }
+        is_var = 0; 
     }
 ;      
 
@@ -489,11 +554,14 @@ Mul_op
 ;    
 
 UnaryExpr
-    : PrimaryExpr
+    : PrimaryExpr 
+    {
+        // printf("UnaryExpr type: %s\n", $ 1); //debug
+    }
     | Unary_op UnaryExpr 
-    { 
+    {
         printf("%s\n", $1);
-        if(check_type($2)!=0){
+        if(strcmp(check_type($2), "null")!=0){
             if(strcmp($1, "POS")==0){
                 if(strcmp($2, "int32")==0){
                     $$ = "int32";
@@ -518,6 +586,7 @@ UnaryExpr
                 $$ = "bool";
             }
         }
+        is_var = 0;
     }
 ;    
 
@@ -528,20 +597,43 @@ Unary_op
 ;    
 
 PrimaryExpr
-    : Operand { $$ = $1; }
-    | ConversionExpr
+    : Operand 
+    { 
+        // printf("PrimaryExpr type: %s\n", $1); //debug
+    }
+    | ConversionExpr 
+    { 
+        // printf("PrimaryExpr type: %s\n", $1); //debug
+    }
     | IndexExpr
 ;    
 
 Operand
-    : Lvalue
+    : Lvalue {
+        // printf("is_left: %d\n", is_left);
+        // if(is_left==0){
+        //     if(strcmp($ 1, "int32")==0){
+        //             fprintf(fout, "\tiload %d\n", Lvar_addr);
+        //         }
+        //         else if(strcmp($ 1, "float32")==0){
+        //             fprintf(fout, "\tfload %d\n", Lvar_addr);
+        //         }
+        //         else if(strcmp($ 1, "string")==0){
+        //             fprintf(fout, "\taload %d\n", Lvar_addr);
+        //         }
+        //         else if(strcmp($ 1, "bool")==0){
+        //             fprintf(fout, "\tiload %d\n", Lvar_addr);
+        //         }
+        // }
+        // printf("Lvalue type: %s\n", $ 1); //debug
+    }
     | '(' Expression ')' { $$ = $2; }
 ;       
 
 IndexExpr 
     : PrimaryExpr '[' Expression ']' { strcpy(types, "null"); }
 ;
-
+//應該有問題
 ConversionExpr
     : Type '(' Expression ')' {
         if(strcmp(check_type($3), "null")!=0){
@@ -555,7 +647,7 @@ ConversionExpr
                 $$ = "int32";
             }
     	}
-        else{
+        else{ //variable
             Symbol t = lookup_symbol($3, 1);
             if(strcmp(t.name, "NotDefineYet")!=0){
                 printf("%c2%c\n", t.type[0], $1[0]);
@@ -569,65 +661,245 @@ ConversionExpr
                 }
             }
     	}
-    	strcpy(types, $1); 
+    	strcpy(types, $1);
     }
 ;    
 
 IncDecStmt
-    : Expression INC { printf("INC\n"); }
-    | Expression DEC { printf("DEC\n"); }
+    : Expression INC { 
+        printf("INC\n");
+        if(strcmp($1, "int32")==0){
+            fprintf(fout, "\ticonst_1\n");
+            fprintf(fout, "\tiadd\n");
+            fprintf(fout, "\tistore %d\n", Lvar_addr);
+            $$ = "int32";
+        }
+        else if(strcmp($1, "float32")==0){
+            fprintf(fout, "\tldc 1.0\n");
+            fprintf(fout, "\tfadd\n");
+            fprintf(fout, "\tfstore %d\n", Lvar_addr);
+            $$ = "float32";
+        }
+        else{
+            g_has_error = true;
+        }
+    }
+    | Expression DEC { 
+        printf("DEC\n");
+        if(strcmp($1, "int32")==0){
+            fprintf(fout, "\ticonst_1\n");
+            fprintf(fout, "\tisub\n");
+            fprintf(fout, "\tistore %d\n", Lvar_addr);
+            $$ = "int32";
+        }
+        else if(strcmp($1, "float32")==0){
+            fprintf(fout, "\tldc 1.0\n");
+            fprintf(fout, "\tfsub\n");
+            fprintf(fout, "\tfstore %d\n", Lvar_addr);    
+            $$ = "float32";        
+        }
+        else{
+            g_has_error = true;
+        }
+    }
 ;    
 
 DeclarationStmt
-    : VAR IDENT Type '=' Expression {
+    : VAR IDENT Type '=' Expression 
+    {
         insert_symbol($2, $3, "-", 0); 
+        Symbol t = lookup_symbol($2, 1);
+        if(strcmp($3, "int32")==0){
+            fprintf(fout, "\tistore %d\n", t.addr);
+        }
+        else if(strcmp($3, "float32")==0){
+            fprintf(fout, "\tfstore %d\n", t.addr);
+        }
+        else if(strcmp($3, "string")==0){
+            fprintf(fout, "\tastore %d\n", t.addr);
+        }
+        else if(strcmp($3, "bool")==0){
+            fprintf(fout, "\tistore %d\n", t.addr);
+        }
     }
     | VAR IDENT Type {
-      	insert_symbol($2, $3, "-", 0);  
+      	insert_symbol($2, $3, "-", 0);
+        Symbol t = lookup_symbol($2, 1);
+        if(strcmp($3, "int32")==0){
+            fprintf(fout, "\ticonst_0\n");
+            fprintf(fout, "\tistore %d\n", t.addr);
+        }
+        else if(strcmp($3, "float32")==0){
+            fprintf(fout, "\tldc 0.0\n");
+            fprintf(fout, "\tfstore %d\n", t.addr);
+        }
+        else if(strcmp($3, "string")==0){
+            fprintf(fout, "\tldc \"\"\n");
+            fprintf(fout, "\tastore %d\n", t.addr);
+        }
+        else if(strcmp($3, "bool")==0){
+            fprintf(fout, "\ticonst_0\n");
+            fprintf(fout, "\tistore %d\n", t.addr);
+        }
     }
     | VAR IDENT Type '=' CallFunc {
-      	insert_symbol($2, $3, "-", 1);  	
+        insert_symbol($2, $3, "-", 1);
+        Symbol t = lookup_symbol($2, 1);
+        if(strcmp($3, "int32")==0){
+            fprintf(fout, "\tistore %d\n", t.addr);
+        }
+        else if(strcmp($3, "float32")==0){
+            fprintf(fout, "\tfstore %d\n", t.addr);
+        }
+        else if(strcmp($3, "string")==0){
+            fprintf(fout, "\tastore %d\n", t.addr);
+        }
+        else if(strcmp($3, "bool")==0){
+            fprintf(fout, "\tistore %d\n", t.addr);
+        }
     }
 ;
 
 AssignmentStmt
     : Lvalue Assign_op Expression { 
-    	if(strcmp(get_exp_type($1), "null")==0)
-        	printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, $2, "ERROR", types); 
-    	if(strcmp(get_exp_type($1), "null")!=0 &&  strcmp(types, "null")!=0 && strcmp(get_exp_type($1), types) != 0){
-        	printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, $2, get_exp_type($1), types);
-    	}	
+        printf("Lvalue type: %s  Expression type: %s\n", $1, $3);
+    	if(strcmp(check_type($1), "null")==0){
+        	printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, $2, "ERROR", $3);
+            g_has_error = true;
+        }
+    	else if(strcmp($1, $3)!=0){
+        	printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, $2, Lvar_type, $3);
+    	    g_has_error = true;
+        }	
+        else{
+            if(strcmp($2, "ADD")==0){
+                if(strcmp($1, "int32")==0){
+                    fprintf(fout, "\tiload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\tiadd\n");
+                }
+                else if(strcmp($1, "float32")==0){
+                    fprintf(fout, "\tfload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\tfadd\n");
+                }
+            }
+            else if(strcmp($2, "SUB")==0){
+                if(strcmp($1, "int32")==0){
+                    fprintf(fout, "\tiload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\tisub\n");
+                }
+                else if(strcmp($1, "float32")==0){
+                    fprintf(fout, "\tfload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\tfsub\n");
+                }
+            }
+            else if(strcmp($2, "MUL")==0){
+                if(strcmp($1, "int32")==0){
+                    fprintf(fout, "\tiload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\timul\n");
+                }
+                else if(strcmp($1, "float32")==0){
+                    fprintf(fout, "\tfload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\tfmul\n");
+                }                
+            }
+            else if(strcmp($2, "QUO")==0){
+                if(strcmp($1, "int32")==0){
+                    fprintf(fout, "\tiload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\tidiv\n");
+                }
+                else if(strcmp($1, "float32")==0){
+                    fprintf(fout, "\tfload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\tfdiv\n");
+                }                
+            }
+            else if(strcmp($2, "REM")==0){
+                if(strcmp($1, "int32")==0){
+                    fprintf(fout, "\tiload %d\n", Lvar_addr);
+                    fprintf(fout, "\tswap\n");
+                    fprintf(fout, "\tirem\n");
+                }             
+            }
+        }
+
+        if(strcmp($1, "int32")==0){
+            fprintf(fout, "\tistore %d\n", Lvar_addr);
+        }
+        else if(strcmp($1, "float32")==0){
+            fprintf(fout, "\tfstore %d\n", Lvar_addr);
+        }
+        else if(strcmp($1, "string")==0){
+            fprintf(fout, "\tastore %d\n", Lvar_addr);
+        }
+        else if(strcmp($1, "bool")==0){
+            fprintf(fout, "\tistore %d\n", Lvar_addr);
+        }
+        // Lvar_addr = -1;
     	printf("%s\n", $2);
+            is_left = 1;
+            Lvar_addr = -1;
+            strcpy(Lvar_name, "null");
     }
-; 
+;
 
 Assign_op
-    : '=' { $$ = "ASSIGN"; }
-    | ADD_ASSIGN { $$="ADD"; }
-    | SUB_ASSIGN { $$="SUB"; }
-    | MUL_ASSIGN { $$="MUL"; }
-    | QUO_ASSIGN { $$="QUO"; }
-    | REM_ASSIGN { $$="REM"; }
+    : '=' { $$ = "ASSIGN"; is_left = 0; }
+    | ADD_ASSIGN { $$="ADD"; is_left = 0; }
+    | SUB_ASSIGN { $$="SUB"; is_left = 0; }
+    | MUL_ASSIGN { $$="MUL"; is_left = 0; }
+    | QUO_ASSIGN { $$="QUO"; is_left = 0; }
+    | REM_ASSIGN { $$="REM"; is_left = 0; }
 ;    
 
 Condition
     : Expression { 
-        if(strcmp("null", get_exp_type($1))!=0 )
-            if(strcmp("int32", get_exp_type($1)) == 0 || strcmp("float32", get_exp_type($1))== 0){
-                printf("error:%d: non-bool (type %s) used as for condition\n", yylineno+1, get_exp_type($1));
-            }        
+        if(strcmp(check_type($1), "null")!=0){
+            if(strcmp($1, "int32")==0 || strcmp($1, "float32")==0){
+                printf("error:%d: non-bool (type %s) used as for condition\n", yylineno+1, $1);
+                g_has_error = true;
+            }
+        }
+        else{
+            g_has_error = true;
+        }
     }
 ;
 
 IfStmt
-    : IF Condition Block
-    | IF Condition Block ELSE IfStmt
-    | IF Condition Block ELSE Block
+    : IF Condition 
+    {
+        if_count++;
+        fprintf(fout, "\tifeq L_if_exit_%d\n", if_count);
+    }
+    Block
+    { fprintf(fout, "L_if_exit_%d:\n", if_count); }
+    //| IF Condition Block ELSE IfStmt
+    //| IF Condition Block ELSE Block
 ;    
 
 ForStmt
-    : FOR Condition Block
-    | FOR SimpleStmt ';' Condition ';' SimpleStmt Block
+    : FOR 
+    {
+        for_count++;
+        fprintf(fout, "L_for_begin_%d:\n", for_count);
+    }
+    Condition
+    {
+        fprintf(fout, "\tifeq L_for_exit_%d\n", for_count);
+    }
+    Block
+    {
+        fprintf(fout, "\tgoto L_for_begin_%d\n", for_count);
+        fprintf(fout, "L_for_exit_%d:\n", for_count);
+    }
+    /* | FOR SimpleStmt ';' Condition ';' SimpleStmt Block */
 ;    
 
 SwitchStmt
@@ -636,8 +908,8 @@ SwitchStmt
 
 CaseStmt 
     : CASE INT_LIT ':' { printf("case %s\n", $<s_val>2); } Block  
-    | DEFAULT ':' Block        
-; 
+    | DEFAULT ':' Block { $$ = "DEFAULT"; }       
+;
 
 Type
     : INT { $$ = "int32"; }
@@ -648,20 +920,19 @@ Type
 
 PrintStmt
     : PRINT '(' Expression ')'{
-        strcpy(printType, check_type($3));
-    	if(strcmp(printType, "null")!=0){
+    	if(strcmp(check_type($3), "null")!=0){
     		printf("PRINT %s\n", $3);
-            if(strcmp(printType, "int32")==0){
+            if(strcmp($3, "int32")==0){
                 fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(I)V\n");
             }
-            else if(strcmp(printType, "float32")==0){
+            else if(strcmp($3, "float32")==0){
                 fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(F)V\n");
             }
-            else if(strcmp(printType, "bool")==0){
+            else if(strcmp($3, "bool")==0){
                 cmp_count++;
                 fprintf(fout, "\tifne L_cmp_%d\n", cmp_count);
                 fprintf(fout, "\tldc \"false\"\n");
@@ -674,7 +945,7 @@ PrintStmt
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(Ljava/lang/String;)V\n");
             }
-            else if(strcmp(printType, "string")==0){
+            else if(strcmp($3, "string")==0){
                 fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/print(Ljava/lang/String;)V\n");
@@ -683,29 +954,44 @@ PrintStmt
     	else{
     		Symbol t = lookup_symbol($3, 1);
         	if(t.addr == -1){
-            		yyerror("print func symbol");
+            	yyerror("print func symbol");
+                g_has_error = true;        
         	}
             else{
-            		printf("PRINT %s\n", t.type);
+            	printf("PRINT %s\n", t.type);
         	}
     	}
     	strcpy(types, "null");
     }
     | PRINTLN '(' Expression ')' {
-        strcpy(printType, check_type($3));
-    	if(strcmp(printType, "null")!=0){
+    	if(strcmp(check_type($3), "null")!=0){
     		printf("PRINTLN %s\n", $3);
-            if(strcmp(printType, "int32")==0){
+            printf("is_var: %d\n", is_var);
+            // if(is_var==1){
+            //     if(strcmp($ 3, "int32")==0){
+            //             fprintf(fout, "\tiload %d\n", Lvar_addr);
+            //         }
+            //         else if(strcmp($ 3, "float32")==0){
+            //             fprintf(fout, "\tfload %d\n", Lvar_addr);
+            //         }
+            //         else if(strcmp($ 3, "string")==0){
+            //             fprintf(fout, "\taload %d\n", Lvar_addr);
+            //         }
+            //         else if(strcmp($ 3, "bool")==0){
+            //             fprintf(fout, "\tiload %d\n", Lvar_addr);
+            //         }
+            // }
+            if(strcmp($3, "int32")==0){
                 fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(I)V\n");
             }
-            else if(strcmp(printType, "float32")==0){
+            else if(strcmp($3, "float32")==0){
                 fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(F)V\n");
             }
-            else if(strcmp(printType, "bool")==0){
+            else if(strcmp($3, "bool")==0){
                 cmp_count++;
                 fprintf(fout, "\tifne L_cmp_%d\n", cmp_count);
                 fprintf(fout, "\tldc \"false\"\n");
@@ -718,7 +1004,7 @@ PrintStmt
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
             }
-            else if(strcmp(printType, "string")==0){
+            else if(strcmp($3, "string")==0){
                 fprintf(fout, "\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n");
                 fprintf(fout, "\tswap\n");
                 fprintf(fout, "\tinvokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
@@ -727,13 +1013,15 @@ PrintStmt
     	else{
     		Symbol t = lookup_symbol($3, 1);
         	if(t.addr == -1){
-            		yyerror("print func symbol");
+            	yyerror("print func symbol");
+                g_has_error = true;
         	}
             else{
-            		printf("PRINTLN %s\n", t.type);
+            	printf("PRINTLN %s\n", t.type);
         	}
     	}
-    	strcpy(types, "null");        
+    	strcpy(types, "null");
+        is_var = 0;        
     }
 ;
 
@@ -838,7 +1126,7 @@ static Symbol lookup_symbol(char* name, int tables){
         if(tables!=0){ //all symbol_table
             for(int i=level; i>=0; i--){
                 for(int j=0; j<table_size[i]; j++){
-                    if(0 == strcmp(symbol_table[i][j].name, name))
+                    if(strcmp(symbol_table[i][j].name, name)==0)
                         return symbol_table[i][j];
                 }
             }
@@ -849,7 +1137,7 @@ static Symbol lookup_symbol(char* name, int tables){
         }
     	else{ //current symbol_table
             for(int i=0; i<table_size[level]; i++){
-                if(0 == strcmp(symbol_table[level][i].name, name))
+                if(strcmp(symbol_table[level][i].name, name)==0)
                     return symbol_table[level][i];
 	        }
 
@@ -873,14 +1161,14 @@ static void dump_symbol(int scope_level){
     level--;
 }
 
-static char* get_exp_type(char* name){
+/* static char* get_exp_type(char* name){
     char* type[10] = {"int32", "float32", "bool", "string",
                     "NEG", "POS", "GTR", "LSS", "NEQ", "EQL"};
     int exist=0;
     for(int i = 0; i<10; i++){
         if(strcmp(name, type[i])==0){
            	exist=1;
-            break;
+            return name;
         } 
     }
     if(exist==0){
@@ -893,8 +1181,8 @@ static char* get_exp_type(char* name){
         }
     }
 
-    return name;
-}
+    return "null";
+} */
 
 static char* check_type(char* name){
         char* type[4] = {"int32",
