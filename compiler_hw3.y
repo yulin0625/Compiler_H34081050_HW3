@@ -45,6 +45,10 @@
     int cmp_count = -1;
     int if_count = -1;
     int for_count = -1;
+    int switch_count = -1;
+    int number_of_case = 0; //紀錄case數量
+    int case_key[10]; //紀錄case的key
+    int has_default = 0; //紀錄是否有default
     //my variable
     Symbol symbol_table[30][40];
     int table_size[30];
@@ -232,12 +236,13 @@ CallFuncParam
 //不確定意義，原本為left
 Lvalue
     : Literal { $$ = $1; is_var = 0;}
-    | IDENT { 
+    | IDENT 
+    { 
     	Symbol t = lookup_symbol($1, 1);
         if(strcmp(t.name, "NotDefineYet")!=0){ 
             printf("IDENT (name=%s, address=%d, type:%s)\n", $1, t.addr, t.type);
                         
-            printf("is_left: %d\n", is_left);
+            // printf("is_left: %d\n", is_left); //debug
             if(1){ //is_left==0, println會出錯,先全部都load
                 if(strcmp(t.type, "int32")==0){
                     fprintf(fout, "\tiload %d\n", t.addr);
@@ -254,12 +259,11 @@ Lvalue
             }
             strcpy(types, t.type);
             
-            printf("var %s type: %s\n", t.name, t.type);
             if(is_left==1){
                 Lvar_addr = t.addr;
                 strcpy(Lvar_name, t.name);
                 strcpy(Lvar_type, t.type);
-                printf("IDENT type: %s\n", t.type);
+                printf("IDENT type: %s, Lvar: %s, Lvar_addr: %d\n", t.type,Lvar_name, Lvar_addr);
             }
             else{
                 Rvar_addr = t.addr;
@@ -406,7 +410,7 @@ CmpExpr
     }
     | CmpExpr Cmp_op AddExpr {
         if(strcmp(check_type($1), "null")==0){
-            printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno+1, $2, "ERROR", types);
+            printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno+1, $2, "ERROR", $3);
             g_has_error = true;
         }
         $$ = "bool";
@@ -467,7 +471,7 @@ Cmp_op
 AddExpr
     : MulExpr 
     {
-        printf("AddExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $1, Lvar_name, Lvar_addr); //debug
+        // printf("AddExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $ 1, Lvar_name, Lvar_addr); //debug
     }
     | AddExpr Add_op MulExpr{
         printf("1: %s  3: %s\n", $1, $3); //debug
@@ -508,7 +512,7 @@ Add_op
 MulExpr
     : UnaryExpr 
     { 
-        printf("MulExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $1, Lvar_name, Lvar_addr); //debug
+        // printf("MulExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $ 1, Lvar_name, Lvar_addr); //debug
     }
     | MulExpr Mul_op UnaryExpr {
         printf("%s\n", $2);
@@ -599,11 +603,13 @@ Unary_op
 PrimaryExpr
     : Operand 
     { 
-        // printf("PrimaryExpr type: %s\n", $1); //debug
+        $$ = $1;
+        // printf("PrimaryExpr type: %s\n", $ 1); //debug
     }
     | ConversionExpr 
     { 
-        // printf("PrimaryExpr type: %s\n", $1); //debug
+        $$ = $1;
+        // printf("PrimaryExpr type: %s\n", $ 1); //debug
     }
     | IndexExpr
 ;    
@@ -626,6 +632,7 @@ Operand
         //         }
         // }
         // printf("Lvalue type: %s\n", $ 1); //debug
+        $$ = $1;
     }
     | '(' Expression ')' { $$ = $2; }
 ;       
@@ -633,7 +640,7 @@ Operand
 IndexExpr 
     : PrimaryExpr '[' Expression ']' { strcpy(types, "null"); }
 ;
-//應該有問題
+
 ConversionExpr
     : Type '(' Expression ')' {
         if(strcmp(check_type($3), "null")!=0){
@@ -903,12 +910,46 @@ ForStmt
 ;    
 
 SwitchStmt
-    : SWITCH Expression Block
+    : SWITCH Expression
+    {
+        switch_count++;
+        fprintf(fout, "\tgoto L_switch%d_begin\n", switch_count);
+    }
+    Block
+    {
+        fprintf(fout, "L_switch%d_begin:\n", switch_count);
+        fprintf(fout, "lookupswitch\n");
+        for(int i=0; i<number_of_case; i++){
+            fprintf(fout, "\t%d: L_case%d_%d\n", case_key[i], switch_count, case_key[i]);
+        }
+        if(has_default==1){
+            fprintf(fout, "\tdefault: L_default%d\n", switch_count);
+        }
+        fprintf(fout, "L_switch%d_end:\n", switch_count);
+        number_of_case = 0;
+        has_default = 0;
+    }
 ;
 
 CaseStmt 
-    : CASE INT_LIT ':' { printf("case %s\n", $<s_val>2); } Block  
-    | DEFAULT ':' Block { $$ = "DEFAULT"; }       
+    : CASE INT_LIT ':' 
+    { 
+        printf("case %s\n", $<s_val>2); 
+        number_of_case++;
+        case_key[number_of_case-1] = atoi($2);
+        fprintf(fout, "L_case%d_%d:\n", switch_count, case_key[number_of_case-1]);
+    } 
+    Block
+    {
+        fprintf(fout, "\tgoto L_switch%d_end\n", switch_count);
+    }  
+    | DEFAULT { fprintf(fout, "L_default%d:\n", switch_count); }
+    ':' Block 
+    { 
+        fprintf(fout, "\tgoto L_switch%d_end\n", switch_count);
+        $$ = "DEFAULT";
+        has_default = 1;
+    }       
 ;
 
 Type
@@ -1043,9 +1084,7 @@ int main(int argc, char *argv[])
     /* Codegen output init */
     char *bytecode_filename = "hw3.j";
     fout = fopen(bytecode_filename, "w");
-    /* CODEGEN(".source hw3.j\n");
-    CODEGEN(".class public Main\n");
-    CODEGEN(".super java/lang/Object\n"); */
+
     fprintf(fout, ".source hw3.j\n");
     fprintf(fout, ".class public Main\n");
     fprintf(fout, ".super java/lang/Object\n\n");
