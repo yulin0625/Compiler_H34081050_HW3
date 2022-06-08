@@ -16,25 +16,12 @@
         printf("error:%d: %s\n", yylineno, s);
     }
 
-    /* Used to generate code */
-    /* As printf; the usage: CODEGEN("%d - %s\n", 100, "Hello world"); */
-    /* We do not enforce the use of this macro */
-    #define CODEGEN(...) \
-        do { \
-            for (int i = 0; i < g_indent_cnt; i++) { \
-                fprintf(fout, "\t"); \
-            } \
-            fprintf(fout, __VA_ARGS__); \
-        } while (0)
-
     /* Symbol table function - you can add new functions if needed. */
     /* parameters and return type can be changed */
     static void create_symbol();
     static void insert_symbol(char* name, char* type, char* func_sig, int is_param_function);
     static Symbol lookup_symbol(char* name, int tables);
     static void dump_symbol(int level);
-
-    // static char* get_exp_type(char* name);
     static char* check_type(char* name);
 
     /* Global variables */
@@ -52,11 +39,10 @@
     //my variable
     Symbol symbol_table[30][40];
     int table_size[30];
-    Symbol *current; //current read in token
+    // Symbol *current; //current read in token
     int address = 0; // symbol table variable address(unique)
     int level = -1; // symbol table scope level
     int is_func = 0;
-    char types[10]; // 檢查expr type(debug用)
     char operation[10]; //紀錄目前的operation
     int is_left = 1; //紀錄var 是否在=左邊，在左的話紀錄Lvar_addr
     int Lvar_addr = -1; //紀錄=左邊的var addr
@@ -136,7 +122,8 @@ PackageStmt
 ;
 
 FunctionDeclStmt
-    : FUNC IDENT {
+    : FUNC IDENT 
+    {
         strcpy(func_name, $2);
         printf("func: %s\n", func_name);
         create_symbol();
@@ -144,7 +131,8 @@ FunctionDeclStmt
     '(' { strcpy(func_signature, "("); } 
     ParameterList
     ')' { strcat(func_signature, ")"); } 
-    ReturnType {
+    ReturnType 
+    {
         strcat(func_signature, return_type);
     	printf ("func_signature: %s\n", func_signature);
     	insert_symbol(func_name, "func", func_signature, 0);
@@ -178,7 +166,8 @@ ParameterList
 ;
 
 Parameter
-    : IDENT Type {
+    : IDENT Type 
+    {
         char type[20];
         char param_type[20];
 
@@ -213,14 +202,15 @@ FuncBlock
 ;
 
 CallFunc
-    : IDENT '(' CallFuncParamList ')' {
+    : IDENT '(' CallFuncParamList ')' 
+    {
         is_func = 1;
     	Symbol t = lookup_symbol($1, 1);
         if(t.addr == -1){
            printf("call: %s%s\n",$1,t.func_sig);
            is_func = 0;
         }
-        fprintf(fout, "\tinvokestatic Main/%s%s\n", $1, t.func_sig); //invoke `fun` method in `Main` class
+        fprintf(fout, "\tinvokestatic Main/%s%s\n", $1, t.func_sig); //invoke  method in `Main` class
     }
 ;    
 
@@ -233,9 +223,11 @@ CallFuncParam
     : Lvalue
     |
 ;    
-//不確定意義，原本為left
+
 Lvalue
-    : Literal { $$ = $1; is_var = 0;}
+    : Literal { $$ = $1; 
+    // is_var = 0; 
+    }
     | IDENT 
     { 
     	Symbol t = lookup_symbol($1, 1);
@@ -245,19 +237,26 @@ Lvalue
             // printf("is_left: %d\n", is_left); //debug
             if(1){ //is_left==0, println會出錯,先全部都load
                 if(strcmp(t.type, "int32")==0){
+                    $$ = "int32";
+                    printf("int32\n"); //debug
                     fprintf(fout, "\tiload %d\n", t.addr);
                 }
                 else if(strcmp(t.type, "float32")==0){
+                    $$ = "float32";
+                    printf("float32\n"); //debug
                     fprintf(fout, "\tfload %d\n", t.addr);
                 }
                 else if(strcmp(t.type, "string")==0){
+                    $$ = "string";
+                    printf("string\n"); //debug
                     fprintf(fout, "\taload %d\n", t.addr);
                 }
                 else if(strcmp(t.type, "bool")==0){
+                    $$ = "bool";
+                    printf("bool\n"); //debug
                     fprintf(fout, "\tiload %d\n", t.addr);
                 }
             }
-            strcpy(types, t.type);
             
             if(is_left==1){
                 Lvar_addr = t.addr;
@@ -270,7 +269,6 @@ Lvalue
                 strcpy(Rvar_name, t.name);
                 printf("IDENT type: %s, Rvar: %s, Rvar_addr: %d\n", t.type, Rvar_name, Rvar_addr);
             }
-            $$ = t.type;
         }
         else{
             printf("error:%d: undefined: %s\n", yylineno+1, $1);
@@ -278,26 +276,26 @@ Lvalue
             g_has_error = true;
             $$ = "null";
         }
-        is_var = 1;
+        // is_var = 1;
     }
 ;
 
 Literal
-    : INT_LIT {
+    : INT_LIT 
+    {
         printf("INT_LIT %s\n", $1); 
-    	strcpy(types, "int32");
         fprintf(fout, "\tldc %s\n", $1);
         $$ = "int32"; 
     }
-    | FLOAT_LIT { 
+    | FLOAT_LIT 
+    { 
         printf("FLOAT_LIT %f\n", atof($1));
-        strcpy(types, "float32");
         fprintf(fout, "\tldc %s\n", $1);
     	$$ = "float32"; 
     }
-    | BOOL_LIT {
+    | BOOL_LIT 
+    {
         printf("%s\n", $1); 
-        strcpy(types, "bool"); 
         if(strcmp(yylval.s_val,"TRUE 1")==0){
             fprintf(fout,"\ticonst_1\n");
         }
@@ -306,16 +304,17 @@ Literal
         }
         $$ = "bool"; 
     }
-    | '"' STRING_LIT '"' { 
+    | '"' STRING_LIT '"' 
+    { 
         printf("STRING_LIT %s\n", $2); 
-        strcpy(types, "string"); 
         fprintf(fout, "\tldc \"%s\"\n", $2);
     	$$ = "string"; 
     }
 ; 
 
 ReturnStmt
-    : RETURN Expression {
+    : RETURN Expression 
+    {
     	if(strcmp(return_type,"I")==0)
     		printf("ireturn\n");
     	else if(strcmp(return_type,"F")==0)
@@ -363,15 +362,15 @@ ExpressionStmt
 Expression
     : LandExpr 
     { 
-        // printf("Expression type: %s\n", $ 1); //debug
+        $$ = $1;
+        printf("Expression type: %s\n", $1); //debug
     }
     | Expression LOR LandExpr {
-        strcpy(types, "bool");
 	    if(strcmp($1, "int32")==0 || strcmp($3, "int32")==0){
 		    yyerror("invalid operation: (operator LOR not defined on int32)");
             g_has_error = true;
 	    }
-	    if(strcmp($1, "float32")==0 || strcmp($3, "float32")==0 ){
+	    if(strcmp($1, "float32")==0 || strcmp($3, "float32")==0){
 		    yyerror("invalid operation: (operator LOR not defined on float32)");
             g_has_error = true;
         }
@@ -384,10 +383,11 @@ Expression
 LandExpr 
     : CmpExpr 
     { 
-        // printf("CmpExpr type: %s\n", $ 1); //debug
-    }//ex: x>1
+        $$ = $1;
+        printf("CmpExpr type: %s\n", $1); //debug
+    }
     | LandExpr LAND CmpExpr { //ex: x>1 && y>2 && z>3 
-        strcpy(types, "bool");
+        printf("1: %s  3: %s\n", $1, $3); //debug
 	    if(strcmp($1, "int32")==0 || strcmp($3, "int32")==0){
 		    yyerror("invalid operation: (operator LAND not defined on int32)");
             g_has_error = true;
@@ -398,7 +398,7 @@ LandExpr
         }
 	    printf("LAND\n"); 
         fprintf(fout, "\tiand\n");
-        is_var = 0; 
+        // is_var = 0; 
         $$ = "bool"; 
     }
 ;    
@@ -406,16 +406,17 @@ LandExpr
 CmpExpr
     : AddExpr 
     { 
-        // printf("CmpExpr type: %s\n", $ 1); //debug
+        $$ = $1;
+        printf("CmpExpr type: %s\n", $1); //debug
     }
     | CmpExpr Cmp_op AddExpr {
-        if(strcmp(check_type($1), "null")==0){
+        printf("1: %s  3: %s\n", $1, $3); //debug
+        if(strcmp(check_type($1), check_type($3))!=0){
             printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno+1, $2, "ERROR", $3);
             g_has_error = true;
         }
         $$ = "bool";
         printf("%s\n", $2); 
-        strcpy(types, "bool");
         if(strcmp($1, "int32")==0){
             fprintf(fout, "\tisub\n");
         }
@@ -455,7 +456,7 @@ CmpExpr
         fprintf(fout, "L_cmp_%d:\n", cmp_count-1);
         fprintf(fout, "\ticonst_1\n");
         fprintf(fout, "L_cmp_%d:\n", cmp_count);
-        is_var = 0; 
+        // is_var = 0; 
     }
 ;    
 
@@ -471,7 +472,8 @@ Cmp_op
 AddExpr
     : MulExpr 
     {
-        // printf("AddExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $ 1, Lvar_name, Lvar_addr); //debug
+        $$ = $1;
+        printf("AddExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $1, Lvar_name, Lvar_addr); //debug
     }
     | AddExpr Add_op MulExpr{
         printf("1: %s  3: %s\n", $1, $3); //debug
@@ -500,7 +502,7 @@ AddExpr
                 $$ = "float32";
             }  
         }
-        is_var = 0; 
+        // is_var = 0; 
     }
 ;    
 
@@ -512,7 +514,8 @@ Add_op
 MulExpr
     : UnaryExpr 
     { 
-        // printf("MulExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $ 1, Lvar_name, Lvar_addr); //debug
+        $$ = $1;
+        printf("MulExpr type: %s, Lvar: %s, Lvar_addr: %d\n", $1, Lvar_name, Lvar_addr); //debug
     }
     | MulExpr Mul_op UnaryExpr {
         printf("%s\n", $2);
@@ -547,7 +550,7 @@ MulExpr
                $$ = "int32";
            }
         }
-        is_var = 0; 
+        // is_var = 0; 
     }
 ;      
 
@@ -560,7 +563,8 @@ Mul_op
 UnaryExpr
     : PrimaryExpr 
     {
-        // printf("UnaryExpr type: %s\n", $ 1); //debug
+        $$ = $1;
+        printf("UnaryExpr type: %s\n", $1); //debug
     }
     | Unary_op UnaryExpr 
     {
@@ -590,7 +594,7 @@ UnaryExpr
                 $$ = "bool";
             }
         }
-        is_var = 0;
+        // is_var = 0;
     }
 ;    
 
@@ -604,41 +608,23 @@ PrimaryExpr
     : Operand 
     { 
         $$ = $1;
-        // printf("PrimaryExpr type: %s\n", $ 1); //debug
+        printf("PrimaryExpr type: %s\n", $1); //debug
     }
     | ConversionExpr 
     { 
         $$ = $1;
-        // printf("PrimaryExpr type: %s\n", $ 1); //debug
+        printf("PrimaryExpr type: %s\n", $1); //debug
     }
     | IndexExpr
 ;    
 
 Operand
-    : Lvalue {
-        // printf("is_left: %d\n", is_left);
-        // if(is_left==0){
-        //     if(strcmp($ 1, "int32")==0){
-        //             fprintf(fout, "\tiload %d\n", Lvar_addr);
-        //         }
-        //         else if(strcmp($ 1, "float32")==0){
-        //             fprintf(fout, "\tfload %d\n", Lvar_addr);
-        //         }
-        //         else if(strcmp($ 1, "string")==0){
-        //             fprintf(fout, "\taload %d\n", Lvar_addr);
-        //         }
-        //         else if(strcmp($ 1, "bool")==0){
-        //             fprintf(fout, "\tiload %d\n", Lvar_addr);
-        //         }
-        // }
-        // printf("Lvalue type: %s\n", $ 1); //debug
-        $$ = $1;
-    }
+    : Lvalue { $$ = $1; printf("Operand type: %s\n", $1); } //debug
     | '(' Expression ')' { $$ = $2; }
 ;       
 
 IndexExpr 
-    : PrimaryExpr '[' Expression ']' { strcpy(types, "null"); }
+    : PrimaryExpr '[' Expression ']' { $$ = "null"; }
 ;
 
 ConversionExpr
@@ -668,7 +654,6 @@ ConversionExpr
                 }
             }
     	}
-    	strcpy(types, $1);
     }
 ;    
 
@@ -769,7 +754,7 @@ DeclarationStmt
 
 AssignmentStmt
     : Lvalue Assign_op Expression { 
-        printf("Lvalue type: %s  Expression type: %s\n", $1, $3);
+        // printf("Lvalue type: %s  Expression type: %s\n", $ 1, $ 3); //debug
     	if(strcmp(check_type($1), "null")==0){
         	printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, $2, "ERROR", $3);
             g_has_error = true;
@@ -848,11 +833,10 @@ AssignmentStmt
         else if(strcmp($1, "bool")==0){
             fprintf(fout, "\tistore %d\n", Lvar_addr);
         }
-        // Lvar_addr = -1;
     	printf("%s\n", $2);
-            is_left = 1;
-            Lvar_addr = -1;
-            strcpy(Lvar_name, "null");
+        is_left = 1;
+        Lvar_addr = -1;
+        strcpy(Lvar_name, "null");
     }
 ;
 
@@ -866,7 +850,8 @@ Assign_op
 ;    
 
 Condition
-    : Expression { 
+    : Expression 
+    { 
         if(strcmp(check_type($1), "null")!=0){
             if(strcmp($1, "int32")==0 || strcmp($1, "float32")==0){
                 printf("error:%d: non-bool (type %s) used as for condition\n", yylineno+1, $1);
@@ -897,10 +882,7 @@ ForStmt
         for_count++;
         fprintf(fout, "L_for_begin_%d:\n", for_count);
     }
-    Condition
-    {
-        fprintf(fout, "\tifeq L_for_exit_%d\n", for_count);
-    }
+    Condition{ fprintf(fout, "\tifeq L_for_exit_%d\n", for_count); }
     Block
     {
         fprintf(fout, "\tgoto L_for_begin_%d\n", for_count);
@@ -939,10 +921,7 @@ CaseStmt
         case_key[number_of_case-1] = atoi($2);
         fprintf(fout, "L_case%d_%d:\n", switch_count, case_key[number_of_case-1]);
     } 
-    Block
-    {
-        fprintf(fout, "\tgoto L_switch%d_end\n", switch_count);
-    }  
+    Block{ fprintf(fout, "\tgoto L_switch%d_end\n", switch_count); }  
     | DEFAULT { fprintf(fout, "L_default%d:\n", switch_count); }
     ':' Block 
     { 
@@ -960,7 +939,8 @@ Type
 ;
 
 PrintStmt
-    : PRINT '(' Expression ')'{
+    : PRINT '(' Expression ')'
+    {
     	if(strcmp(check_type($3), "null")!=0){
     		printf("PRINT %s\n", $3);
             if(strcmp($3, "int32")==0){
@@ -993,21 +973,15 @@ PrintStmt
             }
     	}
     	else{
-    		Symbol t = lookup_symbol($3, 1);
-        	if(t.addr == -1){
-            	yyerror("print func symbol");
-                g_has_error = true;        
-        	}
-            else{
-            	printf("PRINT %s\n", t.type);
-        	}
+            printf("type wrong\n");
+            printf("PRINT %s\n", $3);
     	}
-    	strcpy(types, "null");
     }
-    | PRINTLN '(' Expression ')' {
+    | PRINTLN '(' Expression ')' 
+    {
     	if(strcmp(check_type($3), "null")!=0){
     		printf("PRINTLN %s\n", $3);
-            printf("is_var: %d\n", is_var);
+            // printf("is_var: %d\n", is_var); //debug
             // if(is_var==1){
             //     if(strcmp($ 3, "int32")==0){
             //             fprintf(fout, "\tiload %d\n", Lvar_addr);
@@ -1052,17 +1026,11 @@ PrintStmt
             }
     	}
     	else{
-    		Symbol t = lookup_symbol($3, 1);
-        	if(t.addr == -1){
-            	yyerror("print func symbol");
-                g_has_error = true;
-        	}
-            else{
-            	printf("PRINTLN %s\n", t.type);
-        	}
+            printf("type wrong\n");
+            printf("PRINTLN %s\n", $3);
+        
     	}
-    	strcpy(types, "null");
-        is_var = 0;        
+        // is_var = 0;        
     }
 ;
 
@@ -1090,14 +1058,11 @@ int main(int argc, char *argv[])
     fprintf(fout, ".super java/lang/Object\n\n");
 
     /* Symbol table init */
-    // Add your code
-    current = (Symbol*)malloc(sizeof(Symbol));
 
     yylineno = 0;
     yyparse();
 
     /* Symbol table dump */
-    // Add your code
     dump_symbol(level);
 
 	printf("Total lines: %d\n", yylineno);
@@ -1117,7 +1082,7 @@ static void create_symbol() {
     printf("> Create symbol table (scope level %d)\n", level);
 }
 
-static void insert_symbol(char* name, char* type, char* func_sig, int is_param) {
+static void insert_symbol(char* name, char* type, char* func_sig, int is_param_function) {
     Symbol t = lookup_symbol(name, 0);
     
     if(strcmp(t.name, "NotDefineYet")!=0){ //redeclared error, but still need to insert
@@ -1130,12 +1095,12 @@ static void insert_symbol(char* name, char* type, char* func_sig, int is_param) 
     	symbol_table[level][table_size[level]].addr = -1;
     	symbol_table[level][table_size[level]].lineno = yylineno+1;
     }
-    else if(is_param==0){
+    else if(is_param_function==0){ //whether its a parameter or the value is from calling function
     	symbol_table[level][table_size[level]].addr = address;
     	symbol_table[level][table_size[level]].lineno = yylineno;
     	address++;
     }
-    else{ //whether its a parameter or the value is from calling function
+    else{
         symbol_table[level][table_size[level]].addr = address;
     	symbol_table[level][table_size[level]].lineno = yylineno+1;
     	address++;
@@ -1149,7 +1114,7 @@ static void insert_symbol(char* name, char* type, char* func_sig, int is_param) 
 }
 
 static Symbol lookup_symbol(char* name, int tables){
-    /*function*/
+    //function，從level 0找
     if(is_func){
     	for(int i=0; i<table_size[0]; i++){
             if(strcmp(symbol_table[0][i].name, name)==0)
@@ -1199,29 +1164,6 @@ static void dump_symbol(int scope_level){
     printf("\n");      
     level--;
 }
-
-/* static char* get_exp_type(char* name){
-    char* type[10] = {"int32", "float32", "bool", "string",
-                    "NEG", "POS", "GTR", "LSS", "NEQ", "EQL"};
-    int exist=0;
-    for(int i = 0; i<10; i++){
-        if(strcmp(name, type[i])==0){
-           	exist=1;
-            return name;
-        } 
-    }
-    if(exist==0){
-        *current = lookup_symbol(name, 1);
-        if(strcmp(current->name, "NotDefineYet")!=0){
-            return current->type;
-        }
-        else{
-            return "null";
-        }
-    }
-
-    return "null";
-} */
 
 static char* check_type(char* name){
         char* type[4] = {"int32",
